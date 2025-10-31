@@ -1,0 +1,28 @@
+# Privacy-First Face Presence System Configuration
+
+# Homomorphic Encryption Context Files
+# These files store the CKKS encryption keys and parameters
+he_public_ctx_file: "he_public_ctx.bin"    # Public context (safe to share)
+he_secret_ctx_file: "he_secret_ctx.bin"    # Secret context (keep secure!)
+
+# Projection Matrix
+# Random projection reduces 512-D embeddings to 128-D for faster HE operations
+he_proj_file: "he_proj.npy"
+
+# Server Database
+# Stores enrolled identities with their projected embeddings
+server_db_file: "faceid_db_server.json"
+
+# Embedding Dimensions
+emb_dim: 512      # Original InsightFace embedding dimension
+proj_dim: 128     # Projected dimension (lower = faster HE, but less accurate)
+
+# Recognition Threshold
+# Cosine similarity threshold for "PRESENT" detection (range: -1.0 to 1.0)
+# Higher = stricter matching, fewer false positives
+# Lower = more lenient matching, more false positives
+threshold: 0.9
+
+# Server Configuration
+server_host: "127.0.0.1"
+server_port: 9009
