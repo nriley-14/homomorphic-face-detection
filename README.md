@@ -134,7 +134,7 @@ faceid-camera --input camera --source 0 --he-send-fps 1
 
 ---
 
-## Advanced: WSL/Network Mode
+## WSL/Network Mode
 
 If your camera is on Windows and you're running the system in WSL/Linux, stream video over UDP with FFmpeg.
 
