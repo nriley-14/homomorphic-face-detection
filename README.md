@@ -131,6 +131,7 @@ faceid-camera --input camera --source 0 --he-send-fps 1
 - Opens preview window (local only)
 - Sends encrypted probes every ~1 second
 - Server logs: `Person detected: Alice (score 0.92) -> PRESENT`
+- Press `v` to toggle encrypted data visualization (shows what data is actually being sent from the camera)
 
 ---
 

@@ -169,6 +169,26 @@ def should_send_probe(now: float, last_send: float, interval: float) -> bool:
     return (now - last_send) >= interval
 
 
+def visualize_encrypted_data(enc_probe_ser: bytes, size: Tuple[int, int] = (400, 400)) -> np.ndarray:
+    """Convert encrypted bytes to visual noise representation.
+    
+    Args:
+        enc_probe_ser: Serialized encrypted probe bytes.
+        size: Output image size (width, height).
+    
+    Returns:
+        BGR image showing encrypted data as pixel noise.
+    """
+    total_pixels = size[0] * size[1] * 3
+    byte_array = np.frombuffer(enc_probe_ser, dtype=np.uint8)
+    
+    if len(byte_array) < total_pixels:
+        byte_array = np.tile(byte_array, (total_pixels // len(byte_array)) + 1)
+    
+    pixels = byte_array[:total_pixels].reshape(size[1], size[0], 3)
+    return pixels.astype(np.uint8)
+
+
 def build_hud_frame(
     frame: np.ndarray,
     bbox: Optional[Sequence[float]],
@@ -306,6 +326,8 @@ def run_camera_node(
     }
     send_interval = 1.0 / max(1e-6, he_send_fps)
     i, t_prev, last_face = 0, time.time(), None
+    show_encrypted = False
+    last_encrypted_bytes = None
 
     while True:
         ok, frame = cap.read()
@@ -341,6 +363,7 @@ def run_camera_node(
                     P, last_face.normed_embedding.astype("float32")
                 )
                 enc_probe = encrypt_probe(he_state["client_ctx"], probe)
+                last_encrypted_bytes = enc_probe
                 scores_enc = send_probe_receive_scores(
                     enc_probe, he_state["public_bytes"], server_host, server_port
                 )
@@ -365,6 +388,12 @@ def run_camera_node(
             he_send_fps,
         )
         cv2.imshow("Camera Node (Encrypted Probes Only)", disp)
+        
+        if show_encrypted and last_encrypted_bytes is not None:
+            enc_vis = visualize_encrypted_data(last_encrypted_bytes)
+            cv2.imshow("Encrypted Data (What Leaves the Camera)", enc_vis)
+        elif not show_encrypted:
+            cv2.destroyWindow("Encrypted Data (What Leaves the Camera)")
 
         k = cv2.waitKey(1) & 0xFF
         if k == ord("q"):
@@ -373,6 +402,9 @@ def run_camera_node(
             fn = f"cam_snapshot_{int(time.time())}.jpg"
             cv2.imwrite(fn, disp)
             print("[CAM] Saved", fn)
+        elif k == ord("v"):
+            show_encrypted = not show_encrypted
+            print(f"[CAM] Encrypted visualization: {'ON' if show_encrypted else 'OFF'}")
 
         i += 1
 
