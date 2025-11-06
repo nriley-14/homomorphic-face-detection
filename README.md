@@ -2,7 +2,7 @@
 
 ## Overview
 
-This system demonstrates privacy-preserving face recognition where **raw video never leaves the device**. The camera detects faces locally, computes encrypted embeddings using homomorphic encryption (HE), and sends only ciphertexts to the server. The server performs encrypted similarity matching without ever seeing plaintext data. This project aims to solve the problem of attackers being able to tap into your live camera feeds (assuming that you only use the cameras to detect faces).
+This system demonstrates privacy-preserving face recognition where raw video never leaves the device. The camera performs local face detection and computes encrypted embeddings using homomorphic encryption (HE), sending only ciphertexts to the server. The server carries out encrypted similarity matching without ever accessing plaintext data. This design prevents attackers from intercepting or viewing camera footage, even if the server or network is compromised, since the raw video remains entirely on the camera device.
 
 ### Key Privacy Features
 
