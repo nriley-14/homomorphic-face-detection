@@ -1,5 +1,27 @@
 # Privacy-First Face Presence with Homomorphic Encryption
 
+## Overview
+
+This system demonstrates privacy-preserving face recognition where **raw video never leaves the device**. The camera detects faces locally, computes encrypted embeddings using homomorphic encryption (HE), and sends only ciphertexts to the server. The server performs encrypted similarity matching without ever seeing plaintext data. This project aims to solve the problem of attackers being able to tap into your live camera feeds (assuming that you only use the cameras to detect faces).
+
+### Key Privacy Features
+
+- **No raw video transmission** - Only encrypted 128-D vectors leave the camera
+- **Homomorphic computation** - Server compares faces while data remains encrypted
+- **End-to-end encryption** - CKKS homomorphic encryption protects data in transit
+
+### Security Considerations
+
+**Protected:**
+- Network traffic is encrypted (CKKS ciphertexts)
+- Server cannot view raw video or plaintext embeddings
+- Minimal attack surface for a live feed hijack like in movies
+
+**Limitations:**
+- Secret key (`he_secret_ctx.bin`) must be protected, and also somehow securely passed between systems at setup.
+- Hardware - someone could tamper with the camera hardware and tap into the raw live feed
+
+---
 ## System Architecture
 
 ```mermaid
@@ -27,28 +49,6 @@ flowchart LR
     style C fill:#e1ffe1
     style F fill:#d4edda
 ```
-
-## Overview
-
-This system demonstrates privacy-preserving face recognition where **raw video never leaves the device**. The camera detects faces locally, computes encrypted embeddings using homomorphic encryption (HE), and sends only ciphertexts to the server. The server performs encrypted similarity matching without ever seeing plaintext data. This project aims to solve the problem of attackers being able to tap into your live camera feeds (assuming that you only use the cameras to detect faces).
-
-### Key Privacy Features
-
-- **No raw video transmission** - Only encrypted 128-D vectors leave the camera
-- **Homomorphic computation** - Server compares faces while data remains encrypted
-- **End-to-end encryption** - CKKS homomorphic encryption protects data in transit
-
-### Security Considerations
-
-**Protected:**
-- Network traffic is encrypted (CKKS ciphertexts)
-- Server cannot view raw video or plaintext embeddings
-- Minimal attack surface for a live feed hijack like in movies
-
-**Limitations:**
-- Secret key (`he_secret_ctx.bin`) must be protected, and also somehow securely passed between systems at setup.
-- Hardware - someone could tamper with the camera hardware and tap into the raw live feed
-
 ---
 
 ## System Components
