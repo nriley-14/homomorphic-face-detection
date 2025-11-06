@@ -138,13 +138,12 @@ def send_blob(sock: socket.socket, b: bytes) -> None:
 
 
 def load_contexts() -> Tuple[Optional[ts.Context], Optional[ts.Context]]:
-    """Load cached public and secret contexts from disk.
+    """Load cached public context from disk. Server operates in blind mode.
 
     Returns:
-        Tuple of (public_context, secret_context), either may be None if missing.
+        Tuple of (public_context, None). Secret context never loaded on server.
     """
     ctx_pub = None
-    ctx_secret = None
 
     if PUB_FILE.exists():
         try:
@@ -153,14 +152,7 @@ def load_contexts() -> Tuple[Optional[ts.Context], Optional[ts.Context]]:
         except Exception as e:
             print("[SERVER] Failed to load public ctx:", e)
 
-    if SECRET_FILE.exists():
-        try:
-            ctx_secret = ts.context_from(SECRET_FILE.read_bytes())
-            print("[SERVER] Loaded secret context (logging enabled).")
-        except Exception as e:
-            print("[SERVER] Failed to load secret ctx:", e)
-
-    return ctx_pub, ctx_secret
+    return ctx_pub, None
 
 
 def validate_client_context(pubblob: bytes, ctx_secret: Optional[ts.Context]) -> bool:
@@ -218,6 +210,35 @@ def update_public_ctx_from_client(
     except Exception as e:
         print("[SERVER] Failed to parse camera public context:", e)
         return None
+
+
+def receive_detection_result(conn: socket.socket) -> None:
+    """Receive detection result from camera and log it.
+
+    Args:
+        conn: Connected client socket.
+    """
+    try:
+        raw = conn.recv(4)
+        if len(raw) < 4:
+            return
+        (length,) = struct.unpack("!I", raw)
+        
+        if length == 0 or length > 1024:  # Sanity check
+            return
+        
+        result_bytes = recv_exact(conn, length)
+        result = json.loads(result_bytes.decode('utf-8'))
+        
+        name = result.get("name", "Unknown")
+        present = result.get("present", False)
+        
+        if present:
+            print(f"[SERVER] Detection logged: {name} -> PRESENT")
+        else:
+            print(f"[SERVER] Detection logged: {name} -> NOT PRESENT")
+    except Exception:
+        pass  # Client may have disconnected
 
 
 def compute_encrypted_scores(
@@ -282,7 +303,7 @@ def handle_client(
     Args:
         conn: Connected client socket.
         cached_ctx_pub: Previously cached public context.
-        ctx_secret: Secret context for logging.
+        ctx_secret: Secret context for logging (unused - server is blind).
         db: Loaded database dict.
 
     Returns:
@@ -303,11 +324,13 @@ def handle_client(
     probe_blob = recv_exact(conn, probe_len) if probe_len > 0 else b""
 
     scores_enc = compute_encrypted_scores(ctx_pub, probe_blob, db["embs"])
-    decrypt_and_log_best(ctx_secret, scores_enc, db["names"])
 
     send_u32(conn, len(scores_enc))
     for es in scores_enc:
         send_blob(conn, es)
+
+    # Receive detection result from camera for logging
+    receive_detection_result(conn)
 
     return ctx_pub
 

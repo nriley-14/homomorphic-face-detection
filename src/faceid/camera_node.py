@@ -79,7 +79,7 @@ def send_probe_receive_scores(
     host: str,
     port: int,
     timeout_s: float = 2.5,
-) -> Optional[List[bytes]]:
+) -> Tuple[Optional[List[bytes]], Optional[socket.socket]]:
     """Send encrypted probe to server and receive encrypted scores.
 
     Args:
@@ -90,43 +90,67 @@ def send_probe_receive_scores(
         timeout_s: Connection timeout in seconds.
 
     Returns:
-        List of encrypted score blobs, or None on failure.
+        Tuple of (list of encrypted score blobs or None, socket for sending result back or None).
     """
     try:
-        with socket.create_connection((host, port), timeout=timeout_s) as s:
-            s.sendall(struct.pack("!I", len(public_ctx_ser) if public_ctx_ser else 0))
-            if public_ctx_ser:
-                s.sendall(public_ctx_ser)
+        s = socket.create_connection((host, port), timeout=timeout_s)
+        s.sendall(struct.pack("!I", len(public_ctx_ser) if public_ctx_ser else 0))
+        if public_ctx_ser:
+            s.sendall(public_ctx_ser)
 
-            s.sendall(struct.pack("!I", len(enc_probe_ser)))
-            s.sendall(enc_probe_ser)
+        s.sendall(struct.pack("!I", len(enc_probe_ser)))
+        s.sendall(enc_probe_ser)
 
+        raw = s.recv(4)
+        if len(raw) < 4:
+            s.close()
+            return None, None
+        (cnt,) = struct.unpack("!I", raw)
+
+        out: List[bytes] = []
+        for _ in range(cnt):
             raw = s.recv(4)
             if len(raw) < 4:
-                return None
-            (cnt,) = struct.unpack("!I", raw)
-
-            out: List[bytes] = []
-            for _ in range(cnt):
-                raw = s.recv(4)
-                if len(raw) < 4:
-                    return None
-                (n,) = struct.unpack("!I", raw)
-                blob = b""
-                while len(blob) < n:
-                    chunk = s.recv(n - len(blob))
-                    if not chunk:
-                        return None
-                    blob += chunk
-                out.append(blob)
-            return out
+                s.close()
+                return None, None
+            (n,) = struct.unpack("!I", raw)
+            blob = b""
+            while len(blob) < n:
+                chunk = s.recv(n - len(blob))
+                if not chunk:
+                    s.close()
+                    return None, None
+                blob += chunk
+            out.append(blob)
+        return out, s
     except Exception:
-        return None
+        return None, None
+
+
+def send_detection_result(sock: Optional[socket.socket], name: str, present: bool) -> None:
+    """Send detection result back to server for logging.
+
+    Args:
+        sock: Connected socket to server.
+        name: Detected person's name.
+        present: Whether threshold was met.
+    """
+    if sock is None:
+        return
+    
+    try:
+        result = json.dumps({"name": name, "present": present})
+        sock.sendall(struct.pack("!I", len(result)))
+        sock.sendall(result.encode('utf-8'))
+    except Exception:
+        pass
+    finally:
+        sock.close()
 
 
 def update_hud_state(
-    hud: Dict, now: float, scores_enc: Optional[List[bytes]], client_ctx
-) -> Dict:
+    hud: Dict, now: float, scores_enc: Optional[List[bytes]], client_ctx, names: List[str]
+) -> Tuple[Dict, Optional[str], bool]:
     """Update HUD state from encrypted scores.
 
     Args:
@@ -134,25 +158,45 @@ def update_hud_state(
         now: Current timestamp.
         scores_enc: Encrypted scores from server, None if offline.
         client_ctx: TenSEAL context for decryption.
+        names: List of enrolled names for logging.
 
     Returns:
-        Updated HUD state dict (pure function).
+        Tuple of (updated HUD state dict, detected name or None, is_present bool).
     """
     if scores_enc is None:
-        return {**hud, "server_online": False}
+        return {**hud, "server_online": False}, None, False
 
     if not scores_enc:
-        return {**hud, "server_online": True}
+        return {**hud, "server_online": True}, None, False
 
     scores = decrypt_scores(client_ctx, scores_enc)
     best_idx = int(np.argmax(scores))
+    best_score = scores[best_idx]
+    
+    # Log what server sent (encrypted) and what we decrypted
+    print(f"[CAM] Received {len(scores_enc)} encrypted scores from server")
+    print(f"[CAM] Decrypted scores: {[f'{s:.3f}' for s in scores]}")
+    
+    detected_name = None
+    is_present = False
+    
+    if best_idx < len(names):
+        best_name = names[best_idx]
+        detected_name = best_name
+        is_present = best_score >= THRESHOLD
+        
+        if is_present:
+            print(f"[CAM] Detection: {best_name} (score {best_score:.3f}) -> PRESENT")
+        else:
+            print(f"[CAM] Best match: {best_name} (score {best_score:.3f}) -> NOT PRESENT (below threshold {THRESHOLD})")
+    
     return {
         **hud,
         "server_online": True,
         "last_best_idx": best_idx,
-        "last_score": scores[best_idx],
+        "last_score": best_score,
         "last_send_time": now,
-    }
+    }, detected_name, is_present
 
 
 def should_send_probe(now: float, last_send: float, interval: float) -> bool:
@@ -364,11 +408,17 @@ def run_camera_node(
                 )
                 enc_probe = encrypt_probe(he_state["client_ctx"], probe)
                 last_encrypted_bytes = enc_probe
-                scores_enc = send_probe_receive_scores(
+                scores_enc, conn_sock = send_probe_receive_scores(
                     enc_probe, he_state["public_bytes"], server_host, server_port
                 )
                 he_state["public_bytes"] = None
-                hud = update_hud_state(hud, now, scores_enc, he_state["client_ctx"])
+                hud, detected_name, is_present = update_hud_state(hud, now, scores_enc, he_state["client_ctx"], names)
+                
+                # Send detection result back to server for logging
+                if detected_name is not None:
+                    send_detection_result(conn_sock, detected_name, is_present)
+                elif conn_sock is not None:
+                    conn_sock.close()
 
         t_now = time.time()
         fps = 1.0 / (t_now - t_prev) if t_now > t_prev else 0.0

@@ -8,47 +8,57 @@ This system demonstrates privacy-preserving face recognition where **raw video n
 
 - **No raw video transmission** - Only encrypted 128-D vectors leave the camera
 - **Homomorphic computation** - Server compares faces while data remains encrypted
-- **End-to-end encryption** - CKKS homomorphic encryption protects data in transit
+- **Server-side blindness** - Server never has secret key, cannot decrypt footage
 
 ### Security Considerations
 
 **Protected:**
 - Network traffic is encrypted (CKKS ciphertexts)
-- Server cannot view raw video or plaintext embeddings
-- Minimal attack surface for a live feed hijack like in movies
+- Server cannot view raw video
+- Minimal attack surface for live feed hijacking
 
 **Limitations:**
-- Secret key (`he_secret_ctx.bin`) must be protected, and also somehow securely passed between systems at setup.
-- Hardware - someone could tamper with the camera hardware and tap into the raw live feed
+- Enrollement embeddings database is plaintext on server
+- Secret key (`he_secret_ctx.bin`) must be protected on camera node
+- Bad actor could still access detection logs
+- Hardware tampering could compromise camera directly
 
 ---
 ## System Architecture
 
 ```mermaid
-flowchart LR
+%%{init: {'flowchart': {'curve': 'basis'}}}%%
+flowchart TB
     subgraph enrollment["ENROLLMENT (One-time)"]
         direction TB
-        A[Enrollment Camera] --> B[Enrollment Hub]
-        B --> C[Generate Files:<br/>• HE Keys<br/>• Projection<br/>• Samples Database<br/>]
+        A[Enrollment Hub] --> B[Generate Files:<br/>• HE Keys<br/>• Projection<br/>• Face Database]
     end
 
     subgraph runtime["RECOGNITION (Runtime)"]
         direction TB
-        D[Camera Node<br/>Capture + Detect Face] -->|🔒 Encrypted 128D| E[HE Server<br/>Compare Encrypted]
-        E -->|🔒 Encrypted Scores| D
-        E --> F[Decrypt + Log:<br/>PRESENT/NOT]
-
+        C[Camera Node<br/>Local Detection<br/>Has Secret Key] -->|1. Encrypted Face Embedding| D[HE Server<br/>No Secret Key<br/>Computes & Logs]
+        D -->|2. Encrypted Scores| C
+        C -->|3. Decrypt Locally| E[Detection Result:<br/>Alice PRESENT<br/>]
+        E -->|4. Send Result| D
     end
 
-    C -.->|Copy Keys| D
-    C -.->|Copy Keys and<br/> Face Embeddings| E
+    %% Key distribution lines (no subgraph)
+    B -.->|Secret Key| C
+    B -.->|Public Key and Database| D
 
-    style A fill:#e1f5ff
-    style D fill:#e1f5ff
-    style E fill:#ffe1e1
-    style C fill:#e1ffe1
-    style F fill:#d4edda
+    style C fill:#e1f5ff
+    style D fill:#ffe1e1
+    style E fill:#d4edda
+    style B fill:#e1ffe1
+
 ```
+
+**Flow:**
+1. Camera encrypts face embedding → sends to server
+2. Server computes similarity (homomorphic) → returns encrypted scores (server is blind to raw video)
+3. Camera decrypts scores locally → determines "Alice PRESENT"
+4. Camera sends plaintext result back to server for logging
+5. Server logs detection without ever decrypting scores or seeing video
 ---
 
 ## System Components
@@ -72,13 +82,13 @@ Captures video, detects faces locally, encrypts embeddings, and sends to server.
 - Display HUD with detection feedback (demo only)
 
 ### 3. HE Server
-Receives encrypted probes and performs homomorphic similarity matching.
+Receives encrypted probes, performs homomorphic similarity matching, and logs decrypted detection results from camera.
 
 **Responsibilities:**
-- Load enrollment database
-- Compute homomorphic comparison operations
-- Decrypt scores locally and log detections
-- Return encrypted scores to camera
+- Load enrollment database (plaintext embeddings + names)
+- Compute homomorphic dot products on encrypted probes
+- Return encrypted scores to camera (server cannot decrypt)
+- Receive and log detection results from camera
 
 ---
 
@@ -120,7 +130,8 @@ faceid-enroll --enroll-name "Alice" --input camera --source 0 --avg-samples 5
 faceid-server
 ```
 
-- Prints context fingerprint and listens on `127.0.0.1:9009`
+- Listens on `127.0.0.1:9009` for encrypted probes
+- Logs detection results sent from camera
 
 **Step 3: Start the camera node**
 
@@ -130,8 +141,9 @@ faceid-camera --input camera --source 0 --he-send-fps 1
 
 - Opens preview window (local only)
 - Sends encrypted probes every ~1 second
-- Server logs: `Person detected: Alice (score 0.92) -> PRESENT`
-- Press `v` to toggle encrypted data visualization (shows what data is actually being sent from the camera)
+- Camera logs: `[CAM] Detection: Alice (score 0.92) -> PRESENT`
+- Server logs: `[SERVER] Detection logged: Alice -> PRESENT`
+- Press `v` to toggle encrypted data visualization (shows jumbled pixels that server receives)
 
 ---
 
