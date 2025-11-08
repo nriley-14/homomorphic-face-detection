@@ -98,7 +98,7 @@ Receives encrypted probes, performs homomorphic similarity matching, and logs de
 
 ```bash
 # Navigate to project directory
-cd ~/classes/321/mastery_extension/client_server
+cd homomorphic-face-detection
 
 # Activate your virtual environment
 source .venv/bin/activate
