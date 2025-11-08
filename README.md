@@ -94,6 +94,8 @@ Receives encrypted probes, performs homomorphic similarity matching, and logs de
 
 ## Quick Start
 
+**Note:** Python 3.10 is the version I tested on and would reccomended using.
+
 ### Installation
 
 ```bash
