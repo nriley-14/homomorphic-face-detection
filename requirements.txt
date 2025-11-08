@@ -1,6 +1,0 @@
-insightface==0.7.3
-numpy==2.2.4
-onnxruntime-gpu==1.21.1
-opencv-python==4.11.0.86
-PyYAML==6.0.2
-tenseal==0.3.15
