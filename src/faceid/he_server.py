@@ -9,7 +9,7 @@ import json
 import socket
 import struct
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
 import tenseal as ts
@@ -19,28 +19,10 @@ from faceid.config import (
     SERVER_DB_FILE as DB_FILE,
     PROJ_FILE,
     PUB_CTX_FILE as PUB_FILE,
-    SEC_CTX_FILE as SECRET_FILE,
     THRESHOLD,
     SERVER_HOST as HOST,
     SERVER_PORT as PORT,
 )
-
-
-def public_from_secret_ctx(ctx_secret: ts.Context) -> bytes:
-    """Serialize context as public-only blob for fingerprint comparison.
-
-    Args:
-        ctx_secret: TenSEAL context with secret key.
-
-    Returns:
-        Serialized public context without secret key.
-    """
-    return ctx_secret.serialize(
-        save_public_key=True,
-        save_secret_key=False,
-        save_galois_keys=True,
-        save_relin_keys=True,
-    )
 
 
 def load_db() -> Dict:
@@ -137,60 +119,30 @@ def send_blob(sock: socket.socket, b: bytes) -> None:
         sock.sendall(b)
 
 
-def load_contexts() -> Tuple[Optional[ts.Context], Optional[ts.Context]]:
-    """Load cached public context from disk. Server operates in blind mode.
+def load_contexts() -> Optional[ts.Context]:
+    """Load cached public context from disk.
 
     Returns:
-        Tuple of (public_context, None). Secret context never loaded on server.
+        Public context if available, None otherwise.
     """
-    ctx_pub = None
-
     if PUB_FILE.exists():
         try:
             ctx_pub = ts.context_from(PUB_FILE.read_bytes())
             print("[SERVER] Loaded cached public context.")
+            return ctx_pub
         except Exception as e:
             print("[SERVER] Failed to load public ctx:", e)
-
-    return ctx_pub, None
-
-
-def validate_client_context(pubblob: bytes, ctx_secret: Optional[ts.Context]) -> bool:
-    """Validate client public context against server secret context.
-
-    Args:
-        pubblob: Serialized public context from client.
-        ctx_secret: Server's secret context for comparison.
-
-    Returns:
-        True if contexts match or no secret available, False on mismatch.
-    """
-    if ctx_secret is None:
-        return True
-
-    cam_fp = public_fingerprint(pubblob)
-    srv_fp = public_fingerprint(public_from_secret_ctx(ctx_secret))
-
-    if cam_fp != srv_fp:
-        print(
-            f"[SERVER] ERROR: HE context mismatch! camera FP={cam_fp} server FP={srv_fp}"
-        )
-        return False
-
-    return True
+    return None
 
 
-def update_public_ctx_from_client(
-    conn: socket.socket, ctx_secret: Optional[ts.Context]
-) -> Optional[ts.Context]:
-    """Receive and validate public context from client.
+def update_public_ctx_from_client(conn: socket.socket) -> Optional[ts.Context]:
+    """Receive public context from client.
 
     Args:
         conn: Connected client socket.
-        ctx_secret: Server's secret context for validation.
 
     Returns:
-        New public context if provided and valid, None otherwise.
+        New public context if provided, None otherwise.
     """
     publen = recv_u32(conn)
     if publen == 0:
@@ -201,9 +153,6 @@ def update_public_ctx_from_client(
     print(
         f"[SERVER] Public context updated from camera. FP={public_fingerprint(pubblob)}"
     )
-
-    if not validate_client_context(pubblob, ctx_secret):
-        return None
 
     try:
         return ts.context_from(pubblob)
@@ -223,16 +172,16 @@ def receive_detection_result(conn: socket.socket) -> None:
         if len(raw) < 4:
             return
         (length,) = struct.unpack("!I", raw)
-        
+
         if length == 0 or length > 1024:  # Sanity check
             return
-        
+
         result_bytes = recv_exact(conn, length)
-        result = json.loads(result_bytes.decode('utf-8'))
-        
+        result = json.loads(result_bytes.decode("utf-8"))
+
         name = result.get("name", "Unknown")
         present = result.get("present", False)
-        
+
         if present:
             print(f"[SERVER] Detection logged: {name} -> PRESENT")
         else:
@@ -258,44 +207,9 @@ def compute_encrypted_scores(
     return [enc_probe.dot(emb).serialize() for emb in db_embs]
 
 
-def decrypt_and_log_best(
-    ctx_secret: Optional[ts.Context],
-    scores_enc: List[bytes],
-    names: List[str],
-) -> None:
-    """Decrypt scores and log best match if secret context available.
-
-    Args:
-        ctx_secret: Secret context for decryption, None disables logging.
-        scores_enc: Serialized encrypted scores.
-        names: Parallel list of identity names.
-    """
-    if ctx_secret is None or not scores_enc:
-        return
-
-    scores = [
-        float(ts.ckks_vector_from(ctx_secret, es).decrypt()[0]) for es in scores_enc
-    ]
-    if not scores:
-        return
-
-    j = int(np.argmax(scores))
-    best_name, best_score = names[j], scores[j]
-
-    if abs(best_score) > 2.0:
-        print(
-            f"[SERVER] WARNING: suspicious score {best_score:.3f}. Check normalization."
-        )
-    elif best_score >= THRESHOLD:
-        print(
-            f"[SERVER] Person detected: {best_name} (score {best_score:.3f}) -> PRESENT"
-        )
-
-
 def handle_client(
     conn: socket.socket,
     cached_ctx_pub: Optional[ts.Context],
-    ctx_secret: Optional[ts.Context],
     db: Dict,
 ) -> Optional[ts.Context]:
     """Handle single client request and return updated public context.
@@ -303,13 +217,12 @@ def handle_client(
     Args:
         conn: Connected client socket.
         cached_ctx_pub: Previously cached public context.
-        ctx_secret: Secret context for logging (unused - server is blind).
         db: Loaded database dict.
 
     Returns:
         Public context to cache for subsequent clients.
     """
-    new_ctx_pub = update_public_ctx_from_client(conn, ctx_secret)
+    new_ctx_pub = update_public_ctx_from_client(conn)
     if new_ctx_pub is None and cached_ctx_pub is None:
         send_u32(conn, 0)
         return cached_ctx_pub
@@ -341,7 +254,7 @@ def main() -> None:
     Loads database and contexts, listens for client connections, and processes
     encrypted face recognition requests using homomorphic encryption.
     """
-    ctx_pub, ctx_secret = load_contexts()
+    ctx_pub = load_contexts()
     db = load_db()
 
     if not db.get("embs"):
@@ -357,7 +270,7 @@ def main() -> None:
             conn, addr = srv.accept()
             with conn:
                 try:
-                    updated_ctx_pub = handle_client(conn, ctx_pub, ctx_secret, db)
+                    updated_ctx_pub = handle_client(conn, ctx_pub, db)
                     if updated_ctx_pub is not None and updated_ctx_pub is not ctx_pub:
                         PUB_FILE.write_bytes(
                             updated_ctx_pub.serialize(
