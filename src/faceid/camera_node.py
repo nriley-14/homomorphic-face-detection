@@ -32,7 +32,15 @@ from faceid.he_utils import (
     encrypt_probe,
     decrypt_scores,
 )
-from faceid.config import PROJ_FILE, PUB_CTX_FILE as PUB_FILE, SEC_CTX_FILE as SEC_FILE, SERVER_DB_FILE, SERVER_HOST, SERVER_PORT, THRESHOLD
+from faceid.config import (
+    PROJ_FILE,
+    PUB_CTX_FILE as PUB_FILE,
+    SEC_CTX_FILE as SEC_FILE,
+    SERVER_DB_FILE,
+    SERVER_HOST,
+    SERVER_PORT,
+    THRESHOLD,
+)
 
 
 def load_names_for_hud(db_path: Path = SERVER_DB_FILE) -> List[str]:
@@ -127,7 +135,9 @@ def send_probe_receive_scores(
         return None, None
 
 
-def send_detection_result(sock: Optional[socket.socket], name: str, present: bool) -> None:
+def send_detection_result(
+    sock: Optional[socket.socket], name: str, present: bool
+) -> None:
     """Send detection result back to server for logging.
 
     Args:
@@ -137,11 +147,11 @@ def send_detection_result(sock: Optional[socket.socket], name: str, present: boo
     """
     if sock is None:
         return
-    
+
     try:
         result = json.dumps({"name": name, "present": present})
         sock.sendall(struct.pack("!I", len(result)))
-        sock.sendall(result.encode('utf-8'))
+        sock.sendall(result.encode("utf-8"))
     except Exception:
         pass
     finally:
@@ -149,7 +159,11 @@ def send_detection_result(sock: Optional[socket.socket], name: str, present: boo
 
 
 def update_hud_state(
-    hud: Dict, now: float, scores_enc: Optional[List[bytes]], client_ctx, names: List[str]
+    hud: Dict,
+    now: float,
+    scores_enc: Optional[List[bytes]],
+    client_ctx,
+    names: List[str],
 ) -> Tuple[Dict, Optional[str], bool]:
     """Update HUD state from encrypted scores.
 
@@ -172,31 +186,37 @@ def update_hud_state(
     scores = decrypt_scores(client_ctx, scores_enc)
     best_idx = int(np.argmax(scores))
     best_score = scores[best_idx]
-    
+
     # Log what server sent (encrypted) and what we decrypted
     print(f"[CAM] Received {len(scores_enc)} encrypted scores from server")
     print(f"[CAM] Decrypted scores: {[f'{s:.3f}' for s in scores]}")
-    
+
     detected_name = None
     is_present = False
-    
+
     if best_idx < len(names):
         best_name = names[best_idx]
         detected_name = best_name
         is_present = best_score >= THRESHOLD
-        
+
         if is_present:
             print(f"[CAM] Detection: {best_name} (score {best_score:.3f}) -> PRESENT")
         else:
-            print(f"[CAM] Best match: {best_name} (score {best_score:.3f}) -> NOT PRESENT (below threshold {THRESHOLD})")
-    
-    return {
-        **hud,
-        "server_online": True,
-        "last_best_idx": best_idx,
-        "last_score": best_score,
-        "last_send_time": now,
-    }, detected_name, is_present
+            print(
+                f"[CAM] Best match: {best_name} (score {best_score:.3f}) -> NOT PRESENT (below threshold {THRESHOLD})"
+            )
+
+    return (
+        {
+            **hud,
+            "server_online": True,
+            "last_best_idx": best_idx,
+            "last_score": best_score,
+            "last_send_time": now,
+        },
+        detected_name,
+        is_present,
+    )
 
 
 def should_send_probe(now: float, last_send: float, interval: float) -> bool:
@@ -213,22 +233,24 @@ def should_send_probe(now: float, last_send: float, interval: float) -> bool:
     return (now - last_send) >= interval
 
 
-def visualize_encrypted_data(enc_probe_ser: bytes, size: Tuple[int, int] = (400, 400)) -> np.ndarray:
+def visualize_encrypted_data(
+    enc_probe_ser: bytes, size: Tuple[int, int] = (400, 400)
+) -> np.ndarray:
     """Convert encrypted bytes to visual noise representation.
-    
+
     Args:
         enc_probe_ser: Serialized encrypted probe bytes.
         size: Output image size (width, height).
-    
+
     Returns:
         BGR image showing encrypted data as pixel noise.
     """
     total_pixels = size[0] * size[1] * 3
     byte_array = np.frombuffer(enc_probe_ser, dtype=np.uint8)
-    
+
     if len(byte_array) < total_pixels:
         byte_array = np.tile(byte_array, (total_pixels // len(byte_array)) + 1)
-    
+
     pixels = byte_array[:total_pixels].reshape(size[1], size[0], 3)
     return pixels.astype(np.uint8)
 
@@ -393,13 +415,13 @@ def run_camera_node(
         if last_face is not None:
             bbox = last_face.bbox
             label = "Face detected"
-            
+
             # Show name if server confirmed PRESENT (score >= threshold)
             if hud.get("last_score") is not None and hud["last_score"] >= THRESHOLD:
                 idx = hud.get("last_best_idx")
                 if idx is not None and idx < len(names):
                     label = names[idx]
-            
+
             now = time.time()
 
             if should_send_probe(now, hud["last_send_time"], send_interval):
@@ -412,8 +434,10 @@ def run_camera_node(
                     enc_probe, he_state["public_bytes"], server_host, server_port
                 )
                 he_state["public_bytes"] = None
-                hud, detected_name, is_present = update_hud_state(hud, now, scores_enc, he_state["client_ctx"], names)
-                
+                hud, detected_name, is_present = update_hud_state(
+                    hud, now, scores_enc, he_state["client_ctx"], names
+                )
+
                 # Send detection result back to server for logging
                 if detected_name is not None:
                     send_detection_result(conn_sock, detected_name, is_present)
@@ -438,7 +462,7 @@ def run_camera_node(
             he_send_fps,
         )
         cv2.imshow("Camera Node (Encrypted Probes Only)", disp)
-        
+
         if show_encrypted and last_encrypted_bytes is not None:
             enc_vis = visualize_encrypted_data(last_encrypted_bytes)
             cv2.imshow("Encrypted Data (What Leaves the Camera)", enc_vis)

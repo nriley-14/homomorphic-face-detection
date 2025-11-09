@@ -15,7 +15,7 @@ from insightface.app import FaceAnalysis
 
 from faceid.config import EMB_DIM, PROJ_DIM
 
-ort.preload_dlls() # Load GPU dlls
+ort.preload_dlls()  # Load GPU dlls
 
 __all__ = [
     "l2_normalize",

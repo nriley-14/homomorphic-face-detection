@@ -24,13 +24,13 @@ def load_config(config_path: Path = Path("config.yaml")) -> Dict[str, Any]:
     if config_path.exists():
         with open(config_path) as f:
             return yaml.safe_load(f)
-    
+
     # Try package directory (for installed package)
     pkg_config = Path(__file__).parent.parent.parent / "config.yaml"
     if pkg_config.exists():
         with open(pkg_config) as f:
             return yaml.safe_load(f)
-    
+
     raise FileNotFoundError(
         f"Config file not found. Looked in:\n"
         f"  - {config_path.absolute()}\n"
